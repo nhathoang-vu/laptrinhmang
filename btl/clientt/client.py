@@ -177,8 +177,8 @@ def start_client():
         listener_thread.start()
 
         # Khởi tạo và chạy webview UI
-        initial_html = "<html><body style='background-color: #111;'><h1 style='color:white; text-align:center; margin-top: 40vh;'>NebulaCast Client</h1><p style='color:white; text-align:center;'>Waiting for server commands...</p></body></html>"
-        window = webview.create_window('NebulaCast Client Display', html=initial_html, fullscreen=True, on_top=True)
+        initial_html = "<html><body style='background-color: #111;'><h1 style='color:white; text-align:center; margin-top: 40vh;'>Client</h1><p style='color:white; text-align:center;'>Waiting for server commands...</p></body></html>"
+        window = webview.create_window('Màn Hình Hiển Thị', html=initial_html, fullscreen=True, on_top=True)
         webview.start(debug=True)  # debug=True để có console của webview
 
     except socket.error as e:
