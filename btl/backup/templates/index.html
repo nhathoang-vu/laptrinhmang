@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trình chiếu LTM</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f4f4; }
+        .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1, h2 { color: #333; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { padding: 8px; border: 1px solid #ddd; text-align: left; }
+        th { background-color: #f0f0f0; }
+        .form-section { margin-bottom: 20px; padding: 15px; border: 1px solid #eee; border-radius: 5px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        select, input[type="text"], button {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            width: calc(100% - 22px);
+        }
+        button { background-color: #007bff; color: white; cursor: pointer; width: auto; padding: 10px 15px;}
+        button:hover { background-color: #0056b3; }
+        .group-management, .command-sender { display: flex; gap: 20px; }
+        .group-management > div, .command-sender > div { flex: 1; }
+        .status-message { padding: 10px; margin-top: 10px; border-radius: 4px; }
+        .status-success { background-color: #d4edda; color: #155724; }
+        .status-error { background-color: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Trình Chiếu Lập Trình Mạng</h1>
+        <div id="statusMessage" class="status-message" style="display:none;"></div>
+
+        <div class="form-section">
+            <h2>Máy khách đã kết nối</h2>
+            <table id="clientsTable">
+                <thead>
+                    <tr>
+                        <th>ID máy khách</th>
+                        <th>Địa chỉ</th>
+                        <th>Nhóm hiện tại</th>
+                        <th>Đăng ký Nhóm</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for client in clients %}
+                    <tr>
+                        <td>{{ client.id }}</td>
+                        <td>{{ client.address }}</td>
+                        <td id="group-{{client.id}}">{{ client.group }}</td>
+                        <td>
+                            <select id="assign-group-{{client.id}}">
+                                {% for group in groups %}
+                                <option value="{{ group }}" {% if client.group == group %}selected{% endif %}>{{ group }}</option>
+                                {% endfor %}
+                            </select>
+                            <button onclick="assignGroup('{{ client.id }}')">Đăng ký</button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4">Không có máy khách kết nối.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <button onclick="window.location.reload()">Làm mới</button>
+        </div>
+
+        <div class="group-management form-section">
+            <div>
+                <h2>Quản lý nhóm</h2>
+                <label for="newGroupName">Tạo nhóm mới:</label>
+                <input type="text" id="newGroupName" placeholder="Nhập tên nhóm">
+                <button onclick="createGroup()">Tạo</button>
+            </div>
+        </div>
+
+        <div class="command-sender form-section">
+            <div>
+                <h2>Gửi yêu cầu</h2>
+                <label for="targetType">Đối tượng:</label>
+                <select id="targetType" onchange="updateTargetOptions()">
+                    <option value="client">Khách</option>
+                    <option value="group">Nhóm</option>
+                </select>
+
+                <label for="targetId">ID:</label>
+                <select id="targetId"></select>
+
+                <label for="contentType">Chọn kiểu:</label>
+                <select id="contentType" onchange="updateContentValueOptions()">
+                    <option value="text_direct">Văn bản (Nhập trực tiếp)</option>
+                    <option value="text_file">Văn bản (từ File)</option>
+                    <option value="image">Ảnh</option>
+                    <option value="video">Video</option>
+                    <option value="clear">Xóa nội dung</option>
+                </select>
+
+                <div id="contentValueContainer">
+                    <label for="contentValue">Nội dung văn bản:</label>
+                    <input type="text" id="contentValueText" placeholder="Enter text here">
+                    <select id="contentValueFile" style="display:none;"></select>
+                </div>
+
+                <button onclick="sendCommand()">Gửi</button>
+            </div>
+        </div>
+
+        <!-- ✅ Khung Preview -->
+        <div class="form-section">
+            <h2>Xem trước nội dung</h2>
+            <div id="previewFrame" style="background: #f4f4f4; padding: 10px; min-height: 200px; border: 1px solid #ccc; border-radius: 8px;">
+                <em>Không có nội dung để xem trước</em>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const clientsData = {{ clients | tojson }};
+        const groupsData = {{ groups | tojson }};
+        const contentFiles = {
+            images: {{ image_files | tojson }},
+            videos: {{ video_files | tojson }},
+            texts: {{ text_files | tojson }}
+        };
+
+        function showStatus(message, isError = false) {
+            const statusDiv = document.getElementById('statusMessage');
+            statusDiv.textContent = message;
+            statusDiv.className = 'status-message ' + (isError ? 'status-error' : 'status-success');
+            statusDiv.style.display = 'block';
+            setTimeout(() => { statusDiv.style.display = 'none'; }, 5000);
+        }
+
+        function updateTargetOptions() {
+            const targetType = document.getElementById('targetType').value;
+            const targetIdSelect = document.getElementById('targetId');
+            targetIdSelect.innerHTML = '';
+            if (targetType === 'client') {
+                clientsData.forEach(client => {
+                    const option = document.createElement('option');
+                    option.value = client.id;
+                    option.text = client.id + ` (${client.address})`;
+                    targetIdSelect.add(option);
+                });
+            } else {
+                groupsData.forEach(group => {
+                    const option = document.createElement('option');
+                    option.value = group;
+                    option.text = group;
+                    targetIdSelect.add(option);
+                });
+            }
+        }
+
+        function updateContentValueOptions() {
+            const contentType = document.getElementById('contentType').value;
+            const textInput = document.getElementById('contentValueText');
+            const fileSelect = document.getElementById('contentValueFile');
+            textInput.style.display = 'none';
+            fileSelect.style.display = 'none';
+            fileSelect.innerHTML = '';
+
+            if (contentType === 'text_direct') {
+                textInput.style.display = 'block';
+                textInput.placeholder = "Nhập nội dung tại đây";
+            } else if (contentType === 'image') {
+                fileSelect.style.display = 'block';
+                contentFiles.images.forEach(file => {
+                    fileSelect.add(new Option(file, file));
+                });
+            } else if (contentType === 'video') {
+                fileSelect.style.display = 'block';
+                contentFiles.videos.forEach(file => {
+                    fileSelect.add(new Option(file, file));
+                });
+            } else if (contentType === 'text_file') {
+                fileSelect.style.display = 'block';
+                contentFiles.texts.forEach(file => {
+                    fileSelect.add(new Option(file, file));
+                });
+            }
+
+            textInput.oninput = updatePreview;
+            fileSelect.onchange = updatePreview;
+            updatePreview();
+        }
+
+        function updatePreview() {
+            const contentType = document.getElementById('contentType').value;
+            const previewDiv = document.getElementById('previewFrame');
+            const textValue = document.getElementById('contentValueText').value;
+            const fileValue = document.getElementById('contentValueFile').value;
+
+            previewDiv.innerHTML = '';
+            if (contentType === 'text_direct') {
+                previewDiv.innerHTML = `<pre style="white-space: pre-wrap; color: white; font-size: 16px;">${textValue}</pre>`;
+                previewDiv.style.backgroundColor = '#222';
+            } else if (contentType === 'text_file') {
+                fetch(`/content/texts/${fileValue}`)
+                    .then(r => r.text())
+                    .then(txt => {
+                        previewDiv.innerHTML = `<pre style="white-space: pre-wrap; color: white; font-size: 16px;">${txt}</pre>`;
+                        previewDiv.style.backgroundColor = '#222';
+                    });
+            } else if (contentType === 'image') {
+                previewDiv.innerHTML = `<img src="/content/images/${fileValue}" style="max-width:100%; max-height:300px;" />`;
+                previewDiv.style.backgroundColor = '#000';
+            } else if (contentType === 'video') {
+                previewDiv.innerHTML = `<video controls style="max-width:100%; max-height:300px;"><source src="/content/videos/${fileValue}" type="video/mp4">Trình duyệt không hỗ trợ video.</video>`;
+                previewDiv.style.backgroundColor = '#000';
+            } else {
+                previewDiv.innerHTML = `<em>Không có nội dung để xem trước</em>`;
+                previewDiv.style.backgroundColor = '#f4f4f4';
+            }
+        }
+
+        async function sendCommand() {
+            const targetType = document.getElementById('targetType').value;
+            const targetId = document.getElementById('targetId').value;
+            const contentType = document.getElementById('contentType').value;
+            let contentValue = '';
+
+            if (contentType === 'text_direct') {
+                contentValue = document.getElementById('contentValueText').value;
+            } else if (['image', 'video', 'text_file'].includes(contentType)) {
+                contentValue = document.getElementById('contentValueFile').value;
+            }
+
+            const payload = {
+                target_type: targetType,
+                target_id: targetId,
+                content_type: contentType,
+                content_value: contentValue
+            };
+
+            try {
+                const response = await fetch('/api/send_command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                showStatus(result.message || "Gửi lệnh thành công", !response.ok);
+            } catch (err) {
+                showStatus("Lỗi mạng hoặc máy chủ không phản hồi", true);
+            }
+        }
+
+        async function createGroup() {
+            const groupName = document.getElementById('newGroupName').value;
+            if (!groupName.trim()) return showStatus("Tên nhóm không được trống", true);
+
+            const res = await fetch('/api/manage_group', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'create', group_name: groupName })
+            });
+            const result = await res.json();
+            showStatus(result.message, !res.ok);
+            if (res.ok) setTimeout(() => window.location.reload(), 1000);
+        }
+
+        async function assignGroup(clientId) {
+            const groupName = document.getElementById(`assign-group-${clientId}`).value;
+            const res = await fetch('/api/manage_group', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'assign', client_id: clientId, group_name: groupName })
+            });
+            const result = await res.json();
+            showStatus(result.message, !res.ok);
+            if (res.ok) document.getElementById(`group-${clientId}`).textContent = groupName;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            updateTargetOptions();
+            updateContentValueOptions();
+        });
+    </script>
+</body>
+</html>
