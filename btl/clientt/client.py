@@ -345,7 +345,7 @@ class Api:
         return f"""
         <html>
         <head>
-            <meta charset="UTF-8"><title>NebulaCast Client</title>
+            <meta charset="UTF-8"><title>Display Client</title>
             <style>
                 body {{ font-family: sans-serif; background-color: #111; color: white; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; margin: 0; text-align: center; }}
                 h1, h3 {{ color: white; }} p {{ color: #ccc; }}
