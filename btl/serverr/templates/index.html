@@ -9,7 +9,7 @@
         .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         h1, h2 { color: #333; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-        th, td { padding: 8px; border: 1px solid #ddd; text-align: left; }
+        th, td { padding: 8px; border: 1px solid #ddd; text-align: left; vertical-align: top; }
         th { background-color: #f0f0f0; }
         .form-section { margin-bottom: 20px; padding: 15px; border: 1px solid #eee; border-radius: 5px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; }
@@ -27,6 +27,12 @@
         .status-message { padding: 10px; margin-top: 10px; border-radius: 4px; }
         .status-success { background-color: #d4edda; color: #155724; }
         .status-error { background-color: #f8d7da; color: #721c24; }
+        .history-log { font-size: 0.9em; max-height: 150px; overflow-y: auto; background: #f9f9f9; padding: 5px; border: 1px solid #eee; margin-top: 5px;}
+        .history-log p { margin: 2px 0; font-size: 0.85em; }
+        .current-content-display { font-size: 0.9em; }
+        .current-content-display strong {color: #007bff;}
+        .toggle-history-btn { font-size: 0.8em; padding: 3px 6px; margin-top:5px; background-color: #6c757d; }
+         .toggle-history-btn:hover { background-color: #5a6268; }
     </style>
 </head>
 <body>
@@ -39,33 +45,54 @@
             <table id="clientsTable">
                 <thead>
                     <tr>
-                        <th>ID máy khách</th>
+                        <th>Username</th> <th>Client ID (Internal)</th>
                         <th>Địa chỉ</th>
                         <th>Nhóm hiện tại</th>
+                        <th>Nội dung đang hiển thị</th>
+                        <th>Lịch sử (Nhấn để xem)</th>
                         <th>Đăng ký Nhóm</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for client in clients %}
-                    <tr>
-                        <td>{{ client.id }}</td>
+                    <tr id="client-row-{{client.client_id}}"> <td>{{ client.username }}</td>
+                        <td>{{ client.client_id }}</td>
                         <td>{{ client.address }}</td>
-                        <td id="group-{{client.id}}">{{ client.group }}</td>
+                        <td id="group-{{client.client_id}}">{{ client.group }}</td>
+                        <td id="current-content-{{client.client_id}}" class="current-content-display">
+                            {% if client.current_content and client.current_content.type != "N/A" %}
+                                <strong>{{ client.current_content.type }}:</strong> {{ client.current_content.value }}
+                                <br><small>({{ client.current_content.timestamp }})</small>
+                            {% else %}
+                                <em>Chưa có thông tin</em>
+                            {% endif %}
+                        </td>
                         <td>
-                            <select id="assign-group-{{client.id}}">
+                            <button class="toggle-history-btn" onclick="toggleHistory('{{ client.client_id }}')">Xem/Ẩn</button>
+                            <div id="history-{{client.client_id}}" class="history-log" style="display:none;">
+                                {% if client.history %}
+                                    {% for entry in client.history | reverse %}
+                                    <p><strong>{{ entry.timestamp }}:</strong> {{ entry.content_sent.type }} - <em>{{ entry.content_sent.value if entry.content_sent.value else entry.command_type }}</em></p>
+                                    {% endfor %}
+                                {% else %}
+                                    <p>Không có lịch sử.</p>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            <select id="assign-group-{{client.client_id}}">
                                 {% for group in groups %}
                                 <option value="{{ group }}" {% if client.group == group %}selected{% endif %}>{{ group }}</option>
                                 {% endfor %}
                             </select>
-                            <button onclick="assignGroup('{{ client.id }}')">Đăng ký</button>
+                            <button onclick="assignGroup('{{ client.client_id }}', '{{ client.username }}')">Đăng ký</button>
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="4">Không có máy khách kết nối.</td></tr>
-                    {% endfor %}
+                    <tr><td colspan="7">Không có máy khách kết nối.</td></tr> {% endfor %}
                 </tbody>
             </table>
-            <button onclick="window.location.reload()">Làm mới</button>
+            <button onclick="window.location.reload()">Làm mới Danh sách Client & Lịch sử</button>
         </div>
 
         <div class="group-management form-section">
@@ -86,8 +113,7 @@
                     <option value="group">Nhóm</option>
                 </select>
 
-                <label for="targetId">ID:</label>
-                <select id="targetId"></select>
+                <label for="targetId">ID (Client ID hoặc Tên Nhóm):</label> <select id="targetId"></select>
 
                 <label for="contentType">Chọn kiểu:</label>
                 <select id="contentType" onchange="updateContentValueOptions()">
@@ -108,7 +134,6 @@
             </div>
         </div>
 
-        <!-- ✅ Khung Preview -->
         <div class="form-section">
             <h2>Xem trước nội dung</h2>
             <div id="previewFrame" style="background: #f4f4f4; padding: 10px; min-height: 200px; border: 1px solid #ccc; border-radius: 8px;">
@@ -118,7 +143,7 @@
     </div>
 
     <script>
-        const clientsData = {{ clients | tojson }};
+        const clientsData = {{ clients | tojson }}; // clientsData giờ chứa username và client_id
         const groupsData = {{ groups | tojson }};
         const contentFiles = {
             images: {{ image_files | tojson }},
@@ -132,6 +157,9 @@
             statusDiv.className = 'status-message ' + (isError ? 'status-error' : 'status-success');
             statusDiv.style.display = 'block';
             setTimeout(() => { statusDiv.style.display = 'none'; }, 5000);
+            if (!isError && (message.includes("Command sent") || message.includes("Gửi lệnh thành công") || message.includes("assigned to group"))){
+                 setTimeout(() => window.location.reload(), 1000);
+            }
         }
 
         function updateTargetOptions() {
@@ -141,11 +169,11 @@
             if (targetType === 'client') {
                 clientsData.forEach(client => {
                     const option = document.createElement('option');
-                    option.value = client.id;
-                    option.text = client.id + ` (${client.address})`;
+                    option.value = client.client_id; // Gửi client_id
+                    option.text = `${client.username} (ID: ${client.client_id}, Addr: ${client.address})`; // Hiển thị username và client_id
                     targetIdSelect.add(option);
                 });
-            } else {
+            } else { // group
                 groupsData.forEach(group => {
                     const option = document.createElement('option');
                     option.value = group;
@@ -156,6 +184,7 @@
         }
 
         function updateContentValueOptions() {
+            // ... (giữ nguyên như trước)
             const contentType = document.getElementById('contentType').value;
             const textInput = document.getElementById('contentValueText');
             const fileSelect = document.getElementById('contentValueFile');
@@ -182,13 +211,13 @@
                     fileSelect.add(new Option(file, file));
                 });
             }
-
             textInput.oninput = updatePreview;
             fileSelect.onchange = updatePreview;
             updatePreview();
         }
 
         function updatePreview() {
+            // ... (giữ nguyên như trước, có thể thêm check fileValue)
             const contentType = document.getElementById('contentType').value;
             const previewDiv = document.getElementById('previewFrame');
             const textValue = document.getElementById('contentValueText').value;
@@ -199,19 +228,41 @@
                 previewDiv.innerHTML = `<pre style="white-space: pre-wrap; color: white; font-size: 16px;">${textValue}</pre>`;
                 previewDiv.style.backgroundColor = '#222';
             } else if (contentType === 'text_file') {
-                fetch(`/content/texts/${fileValue}`)
-                    .then(r => r.text())
-                    .then(txt => {
-                        previewDiv.innerHTML = `<pre style="white-space: pre-wrap; color: white; font-size: 16px;">${txt}</pre>`;
-                        previewDiv.style.backgroundColor = '#222';
-                    });
+                 if(fileValue) {
+                    fetch(`/content/texts/${fileValue}`)
+                        .then(r => r.ok ? r.text() : Promise.reject('File not found or error reading'))
+                        .then(txt => {
+                            previewDiv.innerHTML = `<pre style="white-space: pre-wrap; color: white; font-size: 16px;">${txt}</pre>`;
+                            previewDiv.style.backgroundColor = '#222';
+                        }).catch(err => {
+                             previewDiv.innerHTML = `<em>Lỗi xem trước file: ${err}</em>`;
+                             previewDiv.style.backgroundColor = '#f4f4f4';
+                        });
+                } else {
+                     previewDiv.innerHTML = `<em>Chọn một file văn bản để xem trước.</em>`;
+                     previewDiv.style.backgroundColor = '#f4f4f4';
+                }
             } else if (contentType === 'image') {
-                previewDiv.innerHTML = `<img src="/content/images/${fileValue}" style="max-width:100%; max-height:300px;" />`;
-                previewDiv.style.backgroundColor = '#000';
+                 if(fileValue){
+                    previewDiv.innerHTML = `<img src="/content/images/${fileValue}" style="max-width:100%; max-height:300px;" />`;
+                    previewDiv.style.backgroundColor = '#000';
+                } else {
+                     previewDiv.innerHTML = `<em>Chọn một file ảnh để xem trước.</em>`;
+                     previewDiv.style.backgroundColor = '#f4f4f4';
+                }
             } else if (contentType === 'video') {
-                previewDiv.innerHTML = `<video controls style="max-width:100%; max-height:300px;"><source src="/content/videos/${fileValue}" type="video/mp4">Trình duyệt không hỗ trợ video.</video>`;
-                previewDiv.style.backgroundColor = '#000';
-            } else {
+                 if(fileValue){
+                    previewDiv.innerHTML = `<video controls style="max-width:100%; max-height:300px;"><source src="/content/videos/${fileValue}" type="video/mp4">Trình duyệt không hỗ trợ video.</video>`;
+                    previewDiv.style.backgroundColor = '#000';
+                } else {
+                     previewDiv.innerHTML = `<em>Chọn một file video để xem trước.</em>`;
+                     previewDiv.style.backgroundColor = '#f4f4f4';
+                }
+            } else if (contentType === 'clear') {
+                 previewDiv.innerHTML = `<em>(Xóa nội dung trên client)</em>`;
+                 previewDiv.style.backgroundColor = '#f4f4f4';
+            }
+            else {
                 previewDiv.innerHTML = `<em>Không có nội dung để xem trước</em>`;
                 previewDiv.style.backgroundColor = '#f4f4f4';
             }
@@ -219,7 +270,7 @@
 
         async function sendCommand() {
             const targetType = document.getElementById('targetType').value;
-            const targetId = document.getElementById('targetId').value;
+            const targetId = document.getElementById('targetId').value; // Sẽ là client_id hoặc group_name
             const contentType = document.getElementById('contentType').value;
             let contentValue = '';
 
@@ -227,11 +278,15 @@
                 contentValue = document.getElementById('contentValueText').value;
             } else if (['image', 'video', 'text_file'].includes(contentType)) {
                 contentValue = document.getElementById('contentValueFile').value;
+                 if (!contentValue && contentType !== 'clear') {
+                    showStatus("Vui lòng chọn một file.", true);
+                    return;
+                }
             }
 
             const payload = {
                 target_type: targetType,
-                target_id: targetId,
+                target_id: targetId, // Gửi client_id
                 content_type: contentType,
                 content_value: contentValue
             };
@@ -244,15 +299,12 @@
                 });
                 const result = await response.json();
                 showStatus(result.message || "Gửi lệnh thành công", !response.ok);
-            } catch (err) {
-                showStatus("Lỗi mạng hoặc máy chủ không phản hồi", true);
-            }
+            } catch (err) { showStatus("Lỗi mạng hoặc máy chủ không phản hồi", true); }
         }
 
         async function createGroup() {
             const groupName = document.getElementById('newGroupName').value;
             if (!groupName.trim()) return showStatus("Tên nhóm không được trống", true);
-
             const res = await fetch('/api/manage_group', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -263,16 +315,29 @@
             if (res.ok) setTimeout(() => window.location.reload(), 1000);
         }
 
-        async function assignGroup(clientId) {
+        // Sửa hàm assignGroup để nhận client_id và username (chỉ để hiển thị trong status)
+        async function assignGroup(clientId, clientUsername) {
             const groupName = document.getElementById(`assign-group-${clientId}`).value;
             const res = await fetch('/api/manage_group', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'assign', client_id: clientId, group_name: groupName })
+                body: JSON.stringify({ action: 'assign', client_id: clientId, group_name: groupName }) // Gửi client_id
             });
             const result = await res.json();
+             // Thông báo có thể dùng clientUsername nếu muốn, nhưng server trả về thông báo đã có client_id
             showStatus(result.message, !res.ok);
-            if (res.ok) document.getElementById(`group-${clientId}`).textContent = groupName;
+            if (res.ok) {
+                document.getElementById(`group-${clientId}`).textContent = groupName;
+            }
+        }
+
+        function toggleHistory(clientId) { // Sử dụng client_id
+            const historyDiv = document.getElementById(`history-${clientId}`);
+            if (historyDiv.style.display === 'none') {
+                historyDiv.style.display = 'block';
+            } else {
+                historyDiv.style.display = 'none';
+            }
         }
 
         document.addEventListener('DOMContentLoaded', () => {
